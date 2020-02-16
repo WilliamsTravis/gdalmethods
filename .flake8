@@ -1,5 +1,0 @@
-[flake8]
-ignore = E731,E402,F
-exclude = .git,__pycache__,conf.py,old,build,dist,*.gypi,*.gyp
-max-complexity = 10
-max-line-length = 79

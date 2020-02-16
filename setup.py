@@ -3,10 +3,9 @@ import subprocess as sp
 from urllib.request import urlopen
 import json
 
-
 # Matching gdal versions
 def match_gdal():
-    # Get system gdal version
+    # Get system gdal version - gdal-config not always available
     gdalinfo = sp.check_output(["gdalinfo", "--version"]).decode()
     gdalv = gdalinfo[gdalinfo.index(" ") + 1: gdalinfo.index(",")]
 
@@ -15,17 +14,20 @@ def match_gdal():
     r = urlopen(pygdaljson)
     pygdalvs = json.loads(r.read())["releases"].keys()
 
-    # This should work if major and 1st minor releases match
-    gdalv = ".".join(gdalv.split("."))
+    # This should work if major and 1st and 2nd minor releases match
     useablevs = [v for v in pygdalvs if gdalv == ".".join(v.split(".")[:3])]
 
-    # Let's try the latest
-    pygdal_version = useablevs[-1]
+    # Let's try the latest if there are any (e.g. no 2.4.4)
+    if useablevs:
+        pygdalv = useablevs[-1]
+    else:
+        pygdalv = ""
 
-    return pygdal_version
+    return pygdalv, gdalv
 
 
-pygdal_version = match_gdal()
+# We might need pygdal in the future
+pygdal_version, gdal_version = match_gdal()
 
 
 setup(
@@ -38,7 +40,8 @@ setup(
                  "to make using GDAL Python bindings easier."),
     include_package_data=True,
     install_requires=['numpy',
-                      'pygdal==' + pygdal_version,
+#                      'pygdal==' + pygdal_version,
+                      'gdal==' + gdal_version,
                       'geopandas',
                       'shapely',
                       'rasterio',
