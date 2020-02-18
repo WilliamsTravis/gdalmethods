@@ -41,7 +41,7 @@ setup(
     include_package_data=True,
     install_requires=['numpy',
 #                      'pygdal==' + pygdal_version,
-                      'gdal==' + gdal_version,
+                      # 'gdal==' + gdal_version,  # <-------------------------- Using a conda environment with preinstalled gdal everything until I figure this out
                       'geopandas',
                       'shapely',
                       'rasterio',

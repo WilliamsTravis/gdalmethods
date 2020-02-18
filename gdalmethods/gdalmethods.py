@@ -800,10 +800,10 @@ class Data_Path:
         self.folder_path = folder_path
         self._expand_check()
 
-    def join(self, file_path):
+    def join(self, *args):
         """Join a file path to the root directory path"""
 
-        return os.path.join(self.folder_path, file_path)
+        return os.path.join(self.folder_path, *args)
 
     def _expand_check(self):
 

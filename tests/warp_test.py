@@ -11,18 +11,19 @@ from osgeo import gdal
 from gdalmethods import warp, gdal_options
 
 
-# Checking for this proj4 string
+# Constants
 ALBERS = ("+proj=aea +lat_1=20 +lat_2=60 +lat_0=40 +lon_0=-96 +x_0=0 "
           "+y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs ")
-
-# We have gridded climate data sets all the way back to 1895!
-SRC = "data/spei2_1895_10_PRISM.tif"
 DST = "data/test.tif"
+SRC = "data/spei2_1895_10_PRISM.tif"
 
-# Get the sample raster
+# Get the sample raster (A drought index for Oct, 1895!)
 if not os.path.exists(SRC):
     URL = "https://wrcc.dri.edu/wwdt/data/PRISM/spei2/spei2_1895_10_PRISM.tif"
     urlretrieve(URL, SRC)
+
+# Create a data folder if not present
+os.makedirs("data", exist_ok=True)
 
 # Tests
 def test_options():
@@ -41,6 +42,7 @@ def test_shape():
     assert test.shape == (908, 1571)
 
 def test_all():
+    """Test three conditions for gdalmethod.warp."""
     test_options()
     test_warp()
     test_shape()
