@@ -139,9 +139,9 @@ def gdal_progress(complete, message, unknown):
     return 1
 
 
-def rasterize(src, dst, attribute, epsg, transform, height, width,
-              navalue=-9999, all_touch=False, dtype=gdal.GDT_Float32,
-              overwrite=False):
+def rasterize(src, dst, attribute, t_srs=None, transform=None, height=None,
+              width=None, template_path=None, navalue=-9999, all_touch=False,
+              dtype=gdal.GDT_Float32, overwrite=False):
     """
     Use GDAL RasterizeLayer to rasterize a shapefile stored on disk and write
     outputs to a file.
@@ -154,7 +154,7 @@ def rasterize(src, dst, attribute, epsg, transform, height, width,
         Destination path for the output raster.
     attribute : str
         Attribute name being rasterized.
-    epsg : int
+    t_srs : int
         EPSG Code associated with target coordinate reference system.
     transform : list | tuple | array
         Geometric affine transformation:
@@ -163,6 +163,8 @@ def rasterize(src, dst, attribute, epsg, transform, height, width,
         Number of y-axis grid cells.
     width : int
         Number of x-axis grid cells.
+    template_path : str
+        The path to a raster with target geometries.
     na : int | float
         The value to assign to non-value grid cells. (defaults to -99999)
     all_touch : boolean
@@ -184,6 +186,7 @@ def rasterize(src, dst, attribute, epsg, transform, height, width,
         3) Use a template as option.
         4) Use more than just EPSG (doesn't always work, also accept proj4)
     """
+
     # Overwrite existing file
     if os.path.exists(dst):
         if overwrite:
@@ -198,6 +201,23 @@ def rasterize(src, dst, attribute, epsg, transform, height, width,
     # Open shapefile, retrieve the layer
     src_data = ogr.Open(src)
     layer = src_data.GetLayer()
+
+    # Create a spatial reference object
+    refs = osr.SpatialReference()
+
+    # If a template is provided
+    if template_path:
+        temp = gdal.Open(template_path)
+        transform = temp.GetGeoTransform()
+        width = temp.RasterXSize
+        height = temp.RasterYSize
+        t_srs = temp.GetProjection()
+        refs.ImportFromWkt(t_srs)
+    else:
+        try:
+            refs.ImportFromEPSG(t_srs)
+        except TypeError:
+            refs.ImportFromProj4(t_srs)
 
     # Use transform to derive coordinates and dimensions
     xmin, xres, xrot, ymax, yrot, yres = transform
@@ -220,10 +240,6 @@ def rasterize(src, dst, attribute, epsg, transform, height, width,
     driver = gdal.GetDriverByName("GTiff")
     trgt = driver.Create(dst, nx, ny, 1, dtype)
     trgt.SetGeoTransform((xmin, xres, xrot, ymax, yrot, yres))
-
-    # Add crs
-    refs = osr.SpatialReference()
-    refs.ImportFromEPSG(epsg)
     trgt.SetProjection(refs.ExportToWkt())
 
     # Set no value
@@ -284,7 +300,7 @@ def read_raster(rasterpath, band=1, navalue=-9999):
     return(array, geometry, arrayref)
 
 
-def reproject_polygon(src, dst, tproj):
+def reproject_polygon(src, dst, t_srs):
     """Reproject a shapefile of polygons and write results to disk. Recreates
     this GDAL command:
         ogr2ogr -s_srs <source_projection> -t_srs <target_projection> dst src
@@ -306,6 +322,10 @@ def reproject_polygon(src, dst, tproj):
     handle any available driver.
     """
 
+    # Create target directory
+    save_path = os.path.dirname(dst)
+    os.makedirs(save_path, exist_ok=True)
+
     # Create Shapefile driver
     driver = ogr.GetDriverByName("ESRI Shapefile")
 
@@ -318,9 +338,9 @@ def reproject_polygon(src, dst, tproj):
     # Target reference information
     trgt_srs = osr.SpatialReference()
     try:
-        trgt_srs.ImportFromEPSG(tproj)
+        trgt_srs.ImportFromEPSG(t_srs)
     except Exception:
-        trgt_srs.ImportFromProj4(tproj)
+        trgt_srs.ImportFromProj4(t_srs)
 
     # The transformation equation
     transform = osr.CoordinateTransformation(src_srs, trgt_srs)
@@ -645,20 +665,19 @@ def to_raster(array, savepath, crs=None, geometry=None, template=None,
 
     # Get options here - not built out yet
     if compress:
-        cops = ["compress=" + compress]
+        creation_ops = ["compress=" + compress]
+    else:
+        creation_ops = None  # <----------------------------------------------- HELP
 
     # Create file
     driver = gdal.GetDriverByName("GTiff")
-    image = driver.Create(savepath, xpixels, ypixels, 1, dtype,
-                          options=cops)
+    image = driver.Create(savepath, xpixels, ypixels, 1, dtype)
 
     # Use a template file to extract affine transformation, crs, and na value
     if template:
         template_file = gdal.Open(template)
         geometry = template_file.GetGeoTransform()
         crs = template_file.GetProjection()
-        band1 = template_file.GetRasterBand(1)
-        navalue = band1.GetNoDataValue()
 
     # Write raster data and attributes to file
     image.SetGeoTransform(geometry)
@@ -706,7 +725,7 @@ def warp(src, dst, dtype="Float32", template=None, overwrite=False,
              dstSRS="epsg:102008")
     """
 
-    # Create progress callback - often these behave differently by module
+    # Create progress callback - these behave differently by module
     def warp_progress(percent, message, unknown):
         """A progress callback that recreates the gdal printouts."""
 
@@ -751,13 +770,21 @@ def warp(src, dst, dtype="Float32", template=None, overwrite=False,
     # Create a spatial reference object
     spatial_ref = osr.SpatialReference()
 
-    # If a template is provided, use its geometry  for target figures
+    # If a template is provided, use its geometry for target figures
     if template:
         temp = gdal.Open(template)
-        transform = temp.GetGeoTransform()
         spatial_ref.ImportFromWkt(temp.GetProjection())
         srs = spatial_ref.ExportToProj4()
-        extent = tuple(split_extent(template, n=1)[0])
+        width = temp.RasterXSize  # consider using these warp options
+        height = temp.RasterYSize
+        transform = temp.GetGeoTransform()
+        xmin, xres, xrot, ymax, yrot, yres = transform
+        xs = [xmin + xres * i for i in range(width)]
+        ys = [ymax + yres * i for i in range(height)]
+        xmax = max(xs) + 0.5*xres
+        ymax = ymax + 0.5*xres
+        ymin = min(ys)
+        extent = [xmin, ymin, xmax, ymax]
         kwargs["dstSRS"] = srs
         kwargs["outputBounds"] = extent
         kwargs["xRes"] = transform[1]
@@ -851,7 +878,7 @@ class Map_Values:
         os.makedirs(out_folder, exist_ok=True)
 
         # Bundle the arguments for map_single (single function)
-        args = list(src, dst, self.val_dict)
+        args = [src, dst, self.val_dict]
 
         # Run it
         self._map_single(args)
@@ -929,6 +956,7 @@ class Map_Values:
                 print(src + ": ")
                 print(error)
                 print("\n")
+                raise
 
     def _map_try(self, val_dict, key):
         """Use a key to return a dictionary value, return a specified value for
