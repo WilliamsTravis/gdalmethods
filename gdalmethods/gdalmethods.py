@@ -24,6 +24,7 @@ import rasterio
 import shutil
 import subprocess as sp
 import sys
+
 from multiprocessing import Pool
 from osgeo import gdal, ogr, osr
 from shapely.geometry import Point
@@ -838,6 +839,9 @@ class Data_Path:
         if "~" in self.folder_path:
             self.folder_path = os.path.expanduser(self.folder_path)
 
+        # Make sure path exists
+        os.makedirs(self.folder_path, exist_ok=True)
+
 
 class Map_Values:
     """Map a set of keys from an input raster (or rasters) to values in an
@@ -878,10 +882,10 @@ class Map_Values:
         os.makedirs(out_folder, exist_ok=True)
 
         # Bundle the arguments for map_single (single function)
-        args = [src, dst, self.val_dict]
+        arg = [src, dst, self.val_dict]
 
         # Run it
-        self._map_single(args)
+        self._map_single(arg)
 
     def map_files(self, src_files, out_folder, ncpu):
         """Take a list of tiled raster files, map values from a dictionary to
@@ -923,7 +927,7 @@ class Map_Values:
         # Return the output file paths
         return dst_files
 
-    def _map_single(self, arg):
+    def _map_single(self, arg, overwrite=True):
         """Map dictionary values from one raster file to another.
 
         Parameters
@@ -941,6 +945,11 @@ class Map_Values:
         src = arg[0]
         dst = arg[1]
         val_dict = arg[2]
+
+        # overwrite
+        if os.path.exists(dst): 
+            if overwrite:
+                os.remove(dst)
 
         # Try to map values from the mapvals dictionary to a new raster
         if not os.path.exists(dst):
