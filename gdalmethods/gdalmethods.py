@@ -17,6 +17,7 @@ Things to do:
       raise an exception here, will that cause overly grave problems?
 """
 
+from glob import glob
 import geopandas as gpd
 import numpy as np
 import os
@@ -24,6 +25,9 @@ import rasterio
 import shutil
 import subprocess as sp
 import sys
+import requests
+import zipfile
+
 from multiprocessing import Pool
 from osgeo import gdal, ogr, osr
 from shapely.geometry import Point
@@ -115,6 +119,19 @@ def gdal_options(module="translate", **kwargs):
         return
 
 
+
+def dlzip(url, path):
+    """Download, unzip, and remove zip file from url."""
+    if not os.path.exists(path):
+        r = requests.get(url)
+        with open(path, 'wb') as file:
+            file.write(r.content)
+        with zipfile.ZipFile(path, 'r') as zip_ref:
+            save_dir = os.path.splitext(path.replace(".zip", ""))[0]
+            zip_ref.extractall(save_dir)
+        os.remove(path)
+
+
 def gdal_progress(complete, message, unknown):
     """A progress callback that recreates the gdal printouts."""
 
@@ -183,8 +200,7 @@ def rasterize(src, dst, attribute, t_srs=None, transform=None, height=None,
     # Things to do:
         1) Catch exceptions
         2) Progress callback
-        3) Use a template as option.
-        4) Use more than just EPSG (doesn't always work, also accept proj4)
+        3) Use more than just EPSG (doesn't always work, also accept proj4)
     """
 
     # Overwrite existing file
@@ -671,7 +687,8 @@ def to_raster(array, savepath, crs=None, geometry=None, template=None,
 
     # Create file
     driver = gdal.GetDriverByName("GTiff")
-    image = driver.Create(savepath, xpixels, ypixels, 1, dtype)
+    image = driver.Create(savepath, xpixels, ypixels, 1, dtype,
+                          options=creation_ops)
 
     # Use a template file to extract affine transformation, crs, and na value
     if template:
@@ -684,6 +701,96 @@ def to_raster(array, savepath, crs=None, geometry=None, template=None,
     image.SetProjection(crs)
     image.GetRasterBand(1).WriteArray(array)
     image.GetRasterBand(1).SetNoDataValue(navalue)
+
+
+def translate(src, dst, overwrite=False, compress=None, **kwargs):
+    """
+    Translate a raster dataset from one format to another.
+
+    Parameters
+    ----------
+    src : str
+        Path to source raster file or containing folder for ESRI Grids.
+    dst : str
+        Path to target raster file.
+    overwrite : boolean
+    compress : str
+        A compression technique. Available options are "DEFLATE", "JPEG",
+        "LZW"
+    **kwargs
+        Any available key word arguments for gdal_translate. Available options
+        and descriptions can be found using gdal_options("translate").
+
+    Returns
+    -------
+    None.
+
+    Notes
+    -----
+
+    The progress bar needs work.
+
+    """
+
+    # Create progress callback - these behave differently by module
+    def translate_progress(percent, message, unknown):
+        """A progress callback that recreates the gdal printouts."""
+
+        # We don't need the message or unknown objects
+        del message, unknown
+
+        # Between numeric printouts we need three dots
+        dots = [[str(i) + d for d in ["2", "5", "8"]] for i in range(10)]
+        dots = [int(l) for sl in dots for l in sl]
+
+        # If divisible by ten, print the number
+        if percent % 10 == 0 and percent != 0:
+            print("{}".format(percent), end="")
+
+        # If one of three numbers between multiples of 10, print a dot
+        elif percent in dots:
+            print(".", end="")
+
+        return 1
+
+    # Expand user paths
+    src = os.path.expanduser(src)
+    dst = os.path.expanduser(dst)
+
+    # Overwrite existing file
+    if os.path.exists(dst):
+        if overwrite:
+            if os.path.isfile(dst):
+                os.remove(dst)
+            else:
+                shutil.rmtree(dst)
+        else:
+            print(dst + " exists, use overwrite=True to replace this file.")
+            return
+
+    # What is the best way to deal with ESRI grids?
+    if not os.path.isfile(src):
+        files = os.listdir(src)
+        if not "hdr.adf" in files:
+            raise FileNotFoundError("Cannot find a translatable file.")
+
+    # Add in key word arguments
+    kwargs["callback"] = gdal_progress
+
+    # Compress
+    if compress:
+        kwargs["creationOptions"] = ["COMPRESS=" + compress]
+
+    # Create an options object
+    ops = gdal_options("translate", **kwargs)
+
+    # We need to open the src data set
+    src = gdal.Open(src)
+
+    # Call
+    print("Processing " + dst + " :")
+    ds = gdal.Translate(destName=dst, srcDS=src, options=ops)
+    del ds
 
 
 def warp(src, dst, dtype="Float32", template=None, overwrite=False,
@@ -821,24 +928,62 @@ def warp(src, dst, dtype="Float32", template=None, overwrite=False,
 class Data_Path:
     """Data_Path joins a root directory path to data file paths."""
 
-    def __init__(self, folder_path):
+    def __init__(self, data_path):
         """Initialize Data_Path."""
 
-        self.folder_path = folder_path
+        self.data_path = data_path
         self._expand_check()
+        self._exist_check()
+
+    def __repr__(self):
+
+        items = ["=".join([str(k), str(v)]) for k, v in self.__dict__.items()]
+        arguments = " ".join(items)
+        msg = "".join(["<Data_Path " + arguments + ">"])
+        return msg
 
     def join(self, *args):
         """Join a file path to the root directory path"""
 
-        return os.path.join(self.folder_path, *args)
+        return os.path.join(self.data_path, *args)
+
+    def contents(self, *args):
+        """List all content in the data_path or in sub directories."""
+
+        items = glob(self.join(*args, "*"))
+
+        return items
+
+    def folders(self, *args):
+        """List folders in the data_path or in sub directories."""
+
+        items = self.contents(*args)
+        folders = [i for i in items if os.path.isdir(i)]
+
+        return folders
+
+    def files(self, *args):
+        """List files in the data_path or in sub directories."""
+
+        items = self.contents(*args)
+        folders = [i for i in items if os.path.isfile(i)]
+        print(self.join(*args))
+
+        return folders
 
     def _expand_check(self):
 
         # Expand the user path if a tilda is present in the root folder path.
-        if "~" in self.folder_path:
-            self.folder_path = os.path.expanduser(self.folder_path)
+        if "~" in self.data_path:
+            self.data_path = os.path.expanduser(self.data_path)
 
+    def _exist_check(self):
+        
+        # Make sure the data path exists.
+        if not os.path.exists(self.data_path):
+            os.makedirs(self.data_path, exist_ok=True)
 
+        
 class Map_Values:
     """Map a set of keys from an input raster (or rasters) to values in an
     output raster (or rasters) using a dictionary of key-value pairs."""
