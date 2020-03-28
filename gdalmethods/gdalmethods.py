@@ -679,16 +679,16 @@ def to_raster(array, savepath, crs=None, geometry=None, template=None,
                   "Choose a value from this list:")
             print(str(list(GDAL_TYPEMAP.keys())))
 
-    # Get options here - not built out yet
-    if compress:
-        creation_ops = ["compress=" + compress]
-    else:
-        creation_ops = None  # <----------------------------------------------- HELP
-
     # Create file
     driver = gdal.GetDriverByName("GTiff")
-    image = driver.Create(savepath, xpixels, ypixels, 1, dtype,
-                          options=creation_ops)
+
+    # Get options here - not built out yet
+    if compress:
+        creation_ops = ["compress=LZW"]
+        image = driver.Create(savepath, xpixels, ypixels, 1, dtype,
+                              options=creation_ops)
+    else:
+        image = driver.Create(savepath, xpixels, ypixels, 1, dtype)
 
     # Use a template file to extract affine transformation, crs, and na value
     if template:
