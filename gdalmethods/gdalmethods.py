@@ -977,11 +977,17 @@ class Data_Path:
         if "~" in self.data_path:
             self.data_path = os.path.expanduser(self.data_path)
 
+<<<<<<< HEAD
     def _exist_check(self):
         
         # Make sure the data path exists.
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path, exist_ok=True)
+=======
+        # Make sure path exists
+        os.makedirs(self.folder_path, exist_ok=True)
+
+>>>>>>> 7d72b59f8f052c79cb5b4c9ac6412f4209066749
 
         
 class Map_Values:
@@ -1023,10 +1029,10 @@ class Map_Values:
         os.makedirs(out_folder, exist_ok=True)
 
         # Bundle the arguments for map_single (single function)
-        args = [src, dst, self.val_dict]
+        arg = [src, dst, self.val_dict]
 
         # Run it
-        self._map_single(args)
+        self._map_single(arg)
 
     def map_files(self, src_files, out_folder, ncpu):
         """Take a list of tiled raster files, map values from a dictionary to
@@ -1068,7 +1074,7 @@ class Map_Values:
         # Return the output file paths
         return dst_files
 
-    def _map_single(self, arg):
+    def _map_single(self, arg, overwrite=True):
         """Map dictionary values from one raster file to another.
 
         Parameters
@@ -1086,6 +1092,11 @@ class Map_Values:
         src = arg[0]
         dst = arg[1]
         val_dict = arg[2]
+
+        # overwrite
+        if os.path.exists(dst): 
+            if overwrite:
+                os.remove(dst)
 
         # Try to map values from the mapvals dictionary to a new raster
         if not os.path.exists(dst):
